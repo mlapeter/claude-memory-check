@@ -17,10 +17,10 @@ npx claude-memory-check --all    # every project's MEMORY.md under ~/.claude/pro
 
 ## Privacy
 
-It only reads `~/.claude` memory files and `CLAUDE.md` files, and prints a report to your terminal. It writes nothing, changes nothing and sends nothing anywhere: no network calls, no telemetry, no dependencies. The source is one file, `check.mjs`.
+It only reads `~/.claude` memory files, `CLAUDE.md` files, and the files those `CLAUDE.md` files `@import` (size only, never printed), and prints a report to your terminal. It writes nothing, changes nothing and sends nothing anywhere: no network calls, no telemetry, no dependencies. The source is one file, `check.mjs`.
 
 ## Not handled
 
-A moved `autoMemoryDirectory` (it says so instead), and Windows paths.
+A moved `autoMemoryDirectory` (it says so instead), `CLAUDE_CONFIG_DIR` / `CLAUDE_CODE_PROJECT_DIR_NAME`, parent-directory `CLAUDE.md` files, and Windows paths. `@import` targets outside `~/.claude` are read for size only, never printed.
 
 MIT licensed. Made by the people behind [Counterparts](https://counterparts.ai/?utm_source=memory-check), a memory for Claude Code with no index to trim.

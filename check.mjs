@@ -21,6 +21,14 @@ const kb = (n) => `${(n / 1024).toFixed(1)}KB`;
 const read = (p) => { try { return fs.readFileSync(p, "utf8"); } catch { return null; } };
 
 // The project folder Claude Code uses for a working directory: every character that isn't a letter or digit becomes "-".
+// Claude Code keys the folder on the git repo root (so subdirectories and worktrees share one); walk up to the nearest .git.
+const repoRoot = (cwd) => {
+  for (let d = cwd; ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, ".git"))) return d;
+    if (path.dirname(d) === d) return cwd;
+  }
+};
+const tilde = (p) => (p.startsWith(home + path.sep) ? "~" + p.slice(home.length) : p);
 const projectDir = (cwd) => path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
 
 function checkMemory(dir, label) {
@@ -28,6 +36,7 @@ function checkMemory(dir, label) {
   const text = read(index);
   if (text === null) return false;
   const lines = text.split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop(); // trailing newline: not an extra line
   const bytes = Buffer.byteLength(text);
   // Where loading stops: the 200th line, or the line that crosses 25KB, whichever comes first.
   let cut = lines.length, used = 0;
@@ -62,17 +71,22 @@ function checkMemory(dir, label) {
 function checkClaudeMd(file) {
   const text = read(file);
   if (text === null) return 0;
-  const lines = text.split("\n").length, bytes = Buffer.byteLength(text);
+  const lineArr = text.split("\n");
+  if (lineArr.length > 1 && lineArr[lineArr.length - 1] === "") lineArr.pop();
+  const lines = lineArr.length, bytes = Buffer.byteLength(text);
   let total = bytes;
-  const imports = [...text.matchAll(/(?:^|\s)@((?:~\/|\.{0,2}\/)?[\w./-]+)/gm)].map((m) => m[1]).filter((p) => /[./]/.test(p));
+  // Imports are @path tokens outside fenced code blocks and inline code; require a path-like token (not @scope/pkg, @user, emails).
+  const prose = text.replace(/^(```|~~~)[\s\S]*?^\1.*$/gm, "").replace(/`[^`\n]*`/g, "");
+  const imports = [...prose.matchAll(/(?:^|\s)@((?:~\/|\.{1,2}\/|\/)[\w./-]+|[\w.-]+(?:\/[\w.-]+)*\/[\w.-]+\.\w+)/gm)].map((m) => m[1])
+    .filter((p) => !/^[\w.-]+\/[\w.-]+$/.test(p) || /\.\w+$/.test(p));
   for (const imp of imports) {
     const p = imp.startsWith("~/") ? path.join(home, imp.slice(2)) : path.resolve(path.dirname(file), imp);
     const t = read(p);
     if (t === null) warn.push(`${file}: imports @${imp}, which doesn't exist`);
     else total += Buffer.byteLength(t);
   }
-  out.push(`${file.replace(home, "~")}: ${lines} lines, ${kb(bytes)}` + (imports.length ? `, ${imports.length} @imports (${kb(total)} with them)` : ""));
-  if (lines > CLAUDE_MD_LINES) warn.push(`${file.replace(home, "~")}: ${lines} lines; the docs suggest under ~200 per file, since all of it loads every session`);
+  out.push(`${tilde(file)}: ${lines} lines, ${kb(bytes)}` + (imports.length ? `, ${imports.length} @imports (${kb(total)} with them)` : ""));
+  if (lines > CLAUDE_MD_LINES) warn.push(`${tilde(file)}: ${lines} lines; the docs suggest under ~200 per file, since all of it loads every session`);
   return total;
 }
 
@@ -86,7 +100,7 @@ if (all) {
   const dirs = fs.existsSync(root) ? fs.readdirSync(root).map((d) => path.join(root, d)) : [];
   const found = dirs.filter((d) => checkMemory(d, path.basename(d)));
   if (!found.length) out.push("\nNo MEMORY.md under ~/.claude/projects (auto memory off, or moved with autoMemoryDirectory).");
-} else if (!checkMemory(projectDir(cwd), "This folder's auto memory")) {
+} else if (!checkMemory(projectDir(repoRoot(cwd)), "This folder's auto memory")) {
   out.push("\nNo auto memory for this folder yet (or it's moved with autoMemoryDirectory). Run with --all to check every project.");
 }
 out.push(`\nCLAUDE.md files and imports: ${kb(total)} of context every session.`);
