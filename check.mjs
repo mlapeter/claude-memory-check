@@ -66,12 +66,18 @@ function projectDir(root) {
   return path.join(projects, hit || prefix);
 }
 
+// Block-level HTML comments, which Claude Code strips before loading (outside fenced code blocks).
+function stripComments(text) {
+  return text.split(/(^(?:```|~~~)[\s\S]*?^(?:```|~~~).*$)/m).map((part, i) =>
+    i % 2 ? part : part.replace(/^[ \t]*<!--(?:(?!-->)[\s\S])*?-->[ \t]*\r?\n?/gm, "")).join("");
+}
+
 // What counts toward the limits: the index without YAML frontmatter or block-level HTML comments, trimmed.
 function loadedText(text) {
   let t = text.replace(/^﻿/, "");
   t = t.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, "");
-  t = t.replace(/^[ \t]*<!--[\s\S]*?-->[ \t]*$/gm, "");
-  return t.replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  t = stripComments(t);
+  return t.replace(/\r\n?/g, "\n").trim();
 }
 
 function checkMemory(dir, label) {
@@ -89,7 +95,7 @@ function checkMemory(dir, label) {
   }
   const dropped = lines.slice(cut).filter((l) => l.trim());
   out.push(`\n${label}: MEMORY.md is ${lines.length} lines, ${kb(bytes)}` +
-    (dropped.length ? `; ${dropped.length} entries past line ${cut} don't load at session start` : "; all of it loads"));
+    (dropped.length ? `; ${dropped.length} entries after the first ${cut} loaded lines don't load at session start` : "; all of it loads"));
   if (dropped.length) {
     warn.push(`${label}: ${dropped.length} MEMORY.md entries are past the 200-line/25KB cut, so Claude doesn't see them at the start of a session`);
     out.push(...dropped.slice(0, 5).map((l) => `    not loaded: ${l.slice(0, 100)}`));
@@ -98,13 +104,15 @@ function checkMemory(dir, label) {
     warn.push(`${label}: MEMORY.md is over 80% of what loads (${lines.length}/${LINES} lines, ${kb(bytes)}/25KB)`);
   }
   // Links in the index to topic files that don't exist, and topic files the index never mentions (Claude won't find them).
-  const linked = new Set([...text.matchAll(/\]\(([^)#\s]+\.md)\)/g)].map((m) => m[1]));
+  const linked = new Set([...text.matchAll(/\]\(([^)#\s]+\.md)\)/g)].map((m) => m[1]).filter((f) => !/^[a-z][\w+.-]*:/i.test(f)));
   const missing = [...linked].filter((f) => !fs.existsSync(path.join(memDir, f)));
   if (missing.length) warn.push(`${label}: MEMORY.md links ${missing.length} files that don't exist: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "..." : ""}`);
   const files = fs.readdirSync(memDir).filter((f) => f.endsWith(".md") && f !== "MEMORY.md");
   const before = lines.slice(0, cut).join("\n");
-  const orphans = files.filter((f) => !text.includes(f));
-  const hidden = files.filter((f) => text.includes(f) && !before.includes(f));
+  const names = (t) => new Set(t.match(/[\w.-]+\.md/g) || []);
+  const inText = names(text), inBefore = names(before);
+  const orphans = files.filter((f) => !inText.has(f));
+  const hidden = files.filter((f) => inText.has(f) && !inBefore.has(f));
   if (orphans.length) warn.push(`${label}: ${orphans.length} topic files aren't in MEMORY.md, so nothing points Claude to them: ${orphans.slice(0, 4).join(", ")}${orphans.length > 4 ? "..." : ""}`);
   if (hidden.length) warn.push(`${label}: ${hidden.length} topic files are only listed past the cut: ${hidden.slice(0, 4).join(", ")}${hidden.length > 4 ? "..." : ""}`);
   out.push(`    ${files.length} topic files (opened on demand, not at startup)`);
@@ -123,9 +131,11 @@ function importsOf(text, file) {
     const explicit = /^(~\/|\.{1,2}\/|\/)/.test(raw);
     const slashed = raw.includes("/");
     const p = raw.startsWith("~/") ? path.join(home, raw.slice(2)) : path.resolve(path.dirname(file), raw);
+    const isFile = (() => { try { return fs.statSync(p).isFile(); } catch { return false; } })();
+    if (isDir(p)) continue;
     if (explicit) found.push({ raw, p });
-    else if (slashed) { if (/\.\w+$/.test(raw) || fs.existsSync(p)) found.push({ raw, p }); }
-    else if (fs.existsSync(p) && fs.statSync(p).isFile()) found.push({ raw, p });
+    else if (slashed) { if (/\.\w+$/.test(raw) || isFile) found.push({ raw, p }); }
+    else if (isFile) found.push({ raw, p });
   }
   return found;
 }
@@ -140,7 +150,7 @@ function importBytes(file, text, hop) {
     if (t === null) { warn.push(`${tilde(file)}: imports @${raw}, which doesn't exist`); continue; }
     if (seen.has(p)) continue;
     seen.add(p);
-    total += Buffer.byteLength(t);
+    total += Buffer.byteLength(stripComments(t));
     if (hop < MAX_HOPS) total += importBytes(p, t, hop + 1).total;
   }
   return { total, count };
@@ -153,7 +163,7 @@ function checkClaudeMd(file) {
   seen.add(file);
   const lineArr = text.split("\n");
   if (lineArr.length > 1 && lineArr[lineArr.length - 1] === "") lineArr.pop();
-  const lines = lineArr.length, bytes = Buffer.byteLength(text);
+  const lines = lineArr.length, bytes = Buffer.byteLength(stripComments(text));
   const imp = importBytes(file, text, 1);
   const total = bytes + imp.total;
   out.push(`${tilde(file)}: ${lines} lines, ${kb(bytes)}` + (imp.count ? `, ${imp.count} @imports (${kb(total)} with them)` : ""));

@@ -27,7 +27,7 @@ test("261-line index: 61 entries past line 200", () => {
   fs.writeFileSync(path.join(mem, "MEMORY.md"), index(261, (i) => `- note ${i}`));
   const o = run();
   assert.match(o, /MEMORY\.md is 261 lines/);
-  assert.match(o, /61 entries past line 200 don't load/);
+  assert.match(o, /61 entries after the first 200 loaded lines don't load/);
   assert.match(o, /not loaded: - note 201/);
 });
 
@@ -43,7 +43,7 @@ test("byte cut comes before the line cut", () => {
   fs.writeFileSync(path.join(mem, "MEMORY.md"), index(100, (i) => `- ${String(i).padStart(3, "0")} ` + "x".repeat(495)));
   const o = run();
   // 501 bytes a line plus newline: line 50 ends at 25,099 bytes, so it and the 50 after it are past the cut.
-  assert.match(o, /51 entries past line 49 don't load/);
+  assert.match(o, /51 entries after the first 49 loaded lines don't load/);
 });
 
 test("frontmatter and block HTML comments don't count", () => {
@@ -115,4 +115,29 @@ test("--all lists every project; no memory says so", () => {
   assert.match(run(), /No auto memory for this folder yet/);
   fs.writeFileSync(path.join(mem, "MEMORY.md"), "- one\n");
   assert.match(run(undefined, "--all"), /-proj: MEMORY\.md is 1 lines/);
+});
+
+test("a comment line with trailing text doesn't swallow the lines after it", () => {
+  const { mem, run } = setup();
+  const body = ["<!-- c1 --> trailing text", ...Array.from({ length: 10 }, (_, i) => `- note ${i}`), "<!--", "block", "-->", "- last"].join("\n") + "\n";
+  fs.writeFileSync(path.join(mem, "MEMORY.md"), body);
+  assert.match(run(), /MEMORY\.md is 12 lines/);
+});
+
+test("blank lines count toward the 200", () => {
+  const { mem, run } = setup();
+  fs.writeFileSync(path.join(mem, "MEMORY.md"), index(150, (i) => `- note ${i}\n\n`));
+  assert.match(run(), /entries after the first 200 loaded lines/);
+});
+
+test("whole-name matching, URL links, directory imports", () => {
+  const { proj, mem, run } = setup();
+  fs.writeFileSync(path.join(mem, "MEMORY.md"), "- [d](data.md)\n- [web](https://example.com/README.md)\n");
+  fs.writeFileSync(path.join(mem, "data.md"), "x");
+  fs.writeFileSync(path.join(mem, "a.md"), "x");
+  fs.mkdirSync(path.join(proj, "docs"));
+  fs.writeFileSync(path.join(proj, "CLAUDE.md"), "See @docs/ for more.\n");
+  const o = run();
+  assert.match(o, /1 topic files aren't in MEMORY\.md.*a\.md/);
+  assert.doesNotMatch(o, /example\.com|docs\/, which/);
 });

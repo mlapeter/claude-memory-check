@@ -11,7 +11,7 @@ Needs Node 18 or later.
 
 ## What it checks
 
-- `MEMORY.md`: lines and size against the 200-line / 25KB cut (frontmatter and HTML comments don't count, as in Claude Code), and which entries fall past it
+- `MEMORY.md`: lines and size against the 200-line / 25KB cut (YAML frontmatter and block-level HTML comments don't count, as in Claude Code), and which entries fall past it
 - links in `MEMORY.md` to topic files that don't exist
 - topic files no index line points to, which Claude won't find on its own
 - topic files listed only past the cut
