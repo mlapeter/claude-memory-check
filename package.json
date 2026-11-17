@@ -1,15 +1,37 @@
 {
   "name": "claude-memory-check",
   "version": "0.1.0",
-  "description": "Read-only check of what Claude Code actually loads from your MEMORY.md and CLAUDE.md files, and what it silently leaves out (the 200-line / 25KB cut).",
+  "description": "Read-only check of what Claude Code loads from your MEMORY.md and CLAUDE.md files, and what falls past the 200-line / 25KB cut.",
   "type": "module",
-  "bin": { "claude-memory-check": "check.mjs" },
-  "files": ["check.mjs", "README.md", "LICENSE"],
-  "engines": { "node": ">=18" },
-  "keywords": ["claude", "claude-code", "memory", "MEMORY.md", "CLAUDE.md"],
+  "bin": {
+    "claude-memory-check": "check.mjs"
+  },
+  "files": [
+    "check.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "memory",
+    "MEMORY.md",
+    "CLAUDE.md"
+  ],
   "author": "Mike Lapeter",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/mlapeter/claude-memory-check.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mlapeter/claude-memory-check.git"
+  },
   "homepage": "https://github.com/mlapeter/claude-memory-check#readme",
-  "bugs": { "url": "https://github.com/mlapeter/claude-memory-check/issues" }
+  "bugs": {
+    "url": "https://github.com/mlapeter/claude-memory-check/issues"
+  }
 }

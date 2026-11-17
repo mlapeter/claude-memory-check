@@ -1,109 +1,185 @@
 #!/usr/bin/env node
-// claude-memory-check: what Claude Code actually loads from your memory files at the start of a session, and what it
-// silently leaves out. Read-only: it never writes, moves or sends anything.
+// claude-memory-check: what Claude Code loads from your memory files at the start of a session, and what it leaves out.
+// Read-only: it never writes, moves or sends anything.
 //
 //   npx claude-memory-check            this folder's CLAUDE.md files and its auto memory (MEMORY.md)
 //   npx claude-memory-check --all      every project's MEMORY.md under ~/.claude/projects
 //
-// Rules it checks, from Claude Code's docs (code.claude.com/docs/en/memory, read 2026-11-03):
-// - only the first 200 lines or 25KB of MEMORY.md, whichever comes first, load at session start; the rest is dropped
+// Rules it checks, from Claude Code's docs (code.claude.com/docs/en/memory and /errors, read 2026-11-17):
+// - only the first 200 lines or 25KB of MEMORY.md, whichever comes first, load at session start; the rest is dropped.
+//   YAML frontmatter and block-level HTML comments are stripped first and don't count.
 // - topic files in the memory folder are not loaded at startup; Claude opens them when the index points it there
-// - CLAUDE.md files load whole (up to 4 MiB), with @imports added at load time; the guidance is under ~200 lines each
+// - the memory folder is keyed on the git repository, so subdirectories and worktrees share one
+// - CLAUDE.md and CLAUDE.local.md load whole (up to 4 MiB) from the working directory and every directory above it,
+//   with @imports expanded (up to four hops); the guidance is under ~200 lines each
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const LINES = 200, BYTES = 25 * 1024, CLAUDE_MD_LINES = 200;
-const home = os.homedir();
-const all = process.argv.includes("--all");
-const warn = [], out = [];
-const kb = (n) => `${(n / 1024).toFixed(1)}KB`;
-const read = (p) => { try { return fs.readFileSync(p, "utf8"); } catch { return null; } };
+const LINES = 200, BYTES = 25000, CLAUDE_MD_LINES = 200, MAX_HOPS = 4, PROJECT_NAME_MAX = 200;
+const args = process.argv.slice(2);
+if (args.includes("--help") || args.includes("-h")) {
+  console.log(`claude-memory-check: what Claude Code loads from MEMORY.md and CLAUDE.md, and what it leaves out.
 
-// The project folder Claude Code uses for a working directory: every character that isn't a letter or digit becomes "-".
-// Claude Code keys the folder on the git repo root (so subdirectories and worktrees share one); walk up to the nearest .git.
-const repoRoot = (cwd) => {
+  npx claude-memory-check          this folder's CLAUDE.md files and auto memory
+  npx claude-memory-check --all    every project's MEMORY.md under ~/.claude/projects
+
+Read-only. Reads local files only; writes nothing, sends nothing.`);
+  process.exit(0);
+}
+const all = args.includes("--all");
+const home = os.homedir();
+const warn = [], out = [];
+const kb = (n) => `${(n / 1000).toFixed(1)}KB`;
+const read = (p) => { try { return fs.readFileSync(p, "utf8"); } catch { return null; } };
+const tilde = (p) => (p === home || p.startsWith(home + path.sep) ? "~" + p.slice(home.length) : p);
+const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+
+// The repository root Claude Code keys auto memory on. In a worktree, .git is a file pointing into the main repo's
+// .git/worktrees/<name>, so follow it back to the main repo. Outside a git repo, the folder itself.
+function repoRoot(cwd) {
   for (let d = cwd; ; d = path.dirname(d)) {
-    if (fs.existsSync(path.join(d, ".git"))) return d;
+    const g = path.join(d, ".git");
+    if (isDir(g)) return d;
+    const t = read(g);
+    if (t !== null) {
+      const m = t.match(/^gitdir:\s*(.+)$/m);
+      if (m) {
+        const gitdir = path.resolve(d, m[1].trim());
+        const i = gitdir.lastIndexOf(`${path.sep}.git${path.sep}worktrees${path.sep}`);
+        if (i !== -1) return gitdir.slice(0, i);
+      }
+      return d;
+    }
     if (path.dirname(d) === d) return cwd;
   }
-};
-const tilde = (p) => (p.startsWith(home + path.sep) ? "~" + p.slice(home.length) : p);
-const projectDir = (cwd) => path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+}
+
+// The project folder name: every character that isn't a letter or digit becomes "-". Names over 200 characters
+// are cut and given a hash suffix, which this matches by prefix.
+function projectDir(root) {
+  const projects = path.join(home, ".claude", "projects");
+  const name = root.replace(/[^A-Za-z0-9]/g, "-");
+  if (name.length <= PROJECT_NAME_MAX) return path.join(projects, name);
+  const prefix = name.slice(0, PROJECT_NAME_MAX) + "-";
+  const hit = (isDir(projects) ? fs.readdirSync(projects) : []).find((d) => d.startsWith(prefix));
+  return path.join(projects, hit || prefix);
+}
+
+// What counts toward the limits: the index without YAML frontmatter or block-level HTML comments, trimmed.
+function loadedText(text) {
+  let t = text.replace(/^﻿/, "");
+  t = t.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, "");
+  t = t.replace(/^[ \t]*<!--[\s\S]*?-->[ \t]*$/gm, "");
+  return t.replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 
 function checkMemory(dir, label) {
-  const index = path.join(dir, "memory", "MEMORY.md");
-  const text = read(index);
+  const memDir = path.join(dir, "memory");
+  const text = read(path.join(memDir, "MEMORY.md"));
   if (text === null) return false;
-  const lines = text.split("\n");
-  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop(); // trailing newline: not an extra line
-  const bytes = Buffer.byteLength(text);
-  // Where loading stops: the 200th line, or the line that crosses 25KB, whichever comes first.
+  const loaded = loadedText(text);
+  const lines = loaded === "" ? [] : loaded.split("\n");
+  const bytes = Buffer.byteLength(loaded);
+  // Where loading stops: after line 200, or at the line that crosses 25KB, whichever comes first.
   let cut = lines.length, used = 0;
   for (let i = 0; i < lines.length; i++) {
-    used += Buffer.byteLength(lines[i]) + 1;
+    used += Buffer.byteLength(lines[i]) + (i ? 1 : 0);
     if (i >= LINES || used > BYTES) { cut = i; break; }
   }
   const dropped = lines.slice(cut).filter((l) => l.trim());
   out.push(`\n${label}: MEMORY.md is ${lines.length} lines, ${kb(bytes)}` +
-    (dropped.length ? `; ${dropped.length} entries past line ${cut} never load at session start` : "; all of it loads"));
+    (dropped.length ? `; ${dropped.length} entries past line ${cut} don't load at session start` : "; all of it loads"));
   if (dropped.length) {
-    warn.push(`${label}: ${dropped.length} MEMORY.md entries are past the 200-line/25KB cut, so Claude never sees them at the start of a session`);
-    out.push(...dropped.slice(0, 5).map((l) => `    not loaded: ${l.slice(0, 100)}`), dropped.length > 5 ? `    ...and ${dropped.length - 5} more` : "");
+    warn.push(`${label}: ${dropped.length} MEMORY.md entries are past the 200-line/25KB cut, so Claude doesn't see them at the start of a session`);
+    out.push(...dropped.slice(0, 5).map((l) => `    not loaded: ${l.slice(0, 100)}`));
+    if (dropped.length > 5) out.push(`    ...and ${dropped.length - 5} more`);
   } else if (lines.length > LINES * 0.8 || bytes > BYTES * 0.8) {
     warn.push(`${label}: MEMORY.md is over 80% of what loads (${lines.length}/${LINES} lines, ${kb(bytes)}/25KB)`);
   }
   // Links in the index to topic files that don't exist, and topic files the index never mentions (Claude won't find them).
-  const memDir = path.join(dir, "memory");
   const linked = new Set([...text.matchAll(/\]\(([^)#\s]+\.md)\)/g)].map((m) => m[1]));
   const missing = [...linked].filter((f) => !fs.existsSync(path.join(memDir, f)));
   if (missing.length) warn.push(`${label}: MEMORY.md links ${missing.length} files that don't exist: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "..." : ""}`);
   const files = fs.readdirSync(memDir).filter((f) => f.endsWith(".md") && f !== "MEMORY.md");
-  const loaded = new Set(lines.slice(0, cut).join("\n").match(/[\w.-]+\.md/g) || []);
+  const before = lines.slice(0, cut).join("\n");
   const orphans = files.filter((f) => !text.includes(f));
-  const hidden = files.filter((f) => text.includes(f) && !loaded.has(f));
+  const hidden = files.filter((f) => text.includes(f) && !before.includes(f));
   if (orphans.length) warn.push(`${label}: ${orphans.length} topic files aren't in MEMORY.md, so nothing points Claude to them: ${orphans.slice(0, 4).join(", ")}${orphans.length > 4 ? "..." : ""}`);
   if (hidden.length) warn.push(`${label}: ${hidden.length} topic files are only listed past the cut: ${hidden.slice(0, 4).join(", ")}${hidden.length > 4 ? "..." : ""}`);
   out.push(`    ${files.length} topic files (opened on demand, not at startup)`);
   return true;
 }
 
+// @imports: @path tokens outside fenced code blocks and code spans. A token with a slash (or starting ~/ ./ ../ /)
+// is an import; a bare name like @AGENTS.md or @README counts only if that file exists next to the importer,
+// so @mentions and @scope/pkg names in prose don't raise false "missing" warnings.
+function importsOf(text, file) {
+  const prose = text.replace(/^(```|~~~)[\s\S]*?^\1.*$/gm, "").replace(/`[^`\n]*`/g, "");
+  const found = [];
+  for (const m of prose.matchAll(/(?:^|\s)@((?:\\ |[^\s`"'()<>\[\]])+)/gm)) {
+    const raw = m[1].replace(/[.,;:!?]+$/, "").replace(/\\ /g, " ");
+    if (!raw || raw.startsWith("@")) continue;
+    const explicit = /^(~\/|\.{1,2}\/|\/)/.test(raw);
+    const slashed = raw.includes("/");
+    const p = raw.startsWith("~/") ? path.join(home, raw.slice(2)) : path.resolve(path.dirname(file), raw);
+    if (explicit) found.push({ raw, p });
+    else if (slashed) { if (/\.\w+$/.test(raw) || fs.existsSync(p)) found.push({ raw, p }); }
+    else if (fs.existsSync(p) && fs.statSync(p).isFile()) found.push({ raw, p });
+  }
+  return found;
+}
+
+const seen = new Set();
+// Bytes an import adds, following nested imports up to four hops; each file counted once.
+function importBytes(file, text, hop) {
+  let total = 0, count = 0;
+  for (const { raw, p } of importsOf(text, file)) {
+    count++;
+    const t = read(p);
+    if (t === null) { warn.push(`${tilde(file)}: imports @${raw}, which doesn't exist`); continue; }
+    if (seen.has(p)) continue;
+    seen.add(p);
+    total += Buffer.byteLength(t);
+    if (hop < MAX_HOPS) total += importBytes(p, t, hop + 1).total;
+  }
+  return { total, count };
+}
+
 function checkClaudeMd(file) {
+  if (seen.has(file)) return 0;
   const text = read(file);
   if (text === null) return 0;
+  seen.add(file);
   const lineArr = text.split("\n");
   if (lineArr.length > 1 && lineArr[lineArr.length - 1] === "") lineArr.pop();
   const lines = lineArr.length, bytes = Buffer.byteLength(text);
-  let total = bytes;
-  // Imports are @path tokens outside fenced code blocks and inline code; require a path-like token (not @scope/pkg, @user, emails).
-  const prose = text.replace(/^(```|~~~)[\s\S]*?^\1.*$/gm, "").replace(/`[^`\n]*`/g, "");
-  const imports = [...prose.matchAll(/(?:^|\s)@((?:~\/|\.{1,2}\/|\/)[\w./-]+|[\w.-]+(?:\/[\w.-]+)*\/[\w.-]+\.\w+)/gm)].map((m) => m[1])
-    .filter((p) => !/^[\w.-]+\/[\w.-]+$/.test(p) || /\.\w+$/.test(p));
-  for (const imp of imports) {
-    const p = imp.startsWith("~/") ? path.join(home, imp.slice(2)) : path.resolve(path.dirname(file), imp);
-    const t = read(p);
-    if (t === null) warn.push(`${file}: imports @${imp}, which doesn't exist`);
-    else total += Buffer.byteLength(t);
-  }
-  out.push(`${tilde(file)}: ${lines} lines, ${kb(bytes)}` + (imports.length ? `, ${imports.length} @imports (${kb(total)} with them)` : ""));
+  const imp = importBytes(file, text, 1);
+  const total = bytes + imp.total;
+  out.push(`${tilde(file)}: ${lines} lines, ${kb(bytes)}` + (imp.count ? `, ${imp.count} @imports (${kb(total)} with them)` : ""));
   if (lines > CLAUDE_MD_LINES) warn.push(`${tilde(file)}: ${lines} lines; the docs suggest under ~200 per file, since all of it loads every session`);
+  if (bytes > 4 * 1024 * 1024) warn.push(`${tilde(file)}: over 4 MiB, so Claude Code skips it entirely`);
   return total;
 }
 
 const cwd = process.cwd();
 out.push("What loads at the start of a Claude Code session here:");
 let total = 0;
-for (const f of [path.join(home, ".claude", "CLAUDE.md"), path.join(cwd, "CLAUDE.md"), path.join(cwd, ".claude", "CLAUDE.md"), path.join(cwd, "CLAUDE.local.md")])
-  total += checkClaudeMd(f);
+// User CLAUDE.md, then every directory from the filesystem root down to here.
+const dirs = [];
+for (let d = cwd; ; d = path.dirname(d)) { dirs.unshift(d); if (path.dirname(d) === d) break; }
+const claudeMds = [path.join(home, ".claude", "CLAUDE.md")];
+for (const d of dirs) claudeMds.push(path.join(d, "CLAUDE.md"), path.join(d, ".claude", "CLAUDE.md"), path.join(d, "CLAUDE.local.md"));
+for (const f of claudeMds) total += checkClaudeMd(f);
 if (all) {
   const root = path.join(home, ".claude", "projects");
-  const dirs = fs.existsSync(root) ? fs.readdirSync(root).map((d) => path.join(root, d)) : [];
-  const found = dirs.filter((d) => checkMemory(d, path.basename(d)));
+  const projects = isDir(root) ? fs.readdirSync(root).map((d) => path.join(root, d)) : [];
+  const found = projects.filter((d) => checkMemory(d, path.basename(d)));
   if (!found.length) out.push("\nNo MEMORY.md under ~/.claude/projects (auto memory off, or moved with autoMemoryDirectory).");
 } else if (!checkMemory(projectDir(repoRoot(cwd)), "This folder's auto memory")) {
   out.push("\nNo auto memory for this folder yet (or it's moved with autoMemoryDirectory). Run with --all to check every project.");
 }
 out.push(`\nCLAUDE.md files and imports: ${kb(total)} of context every session.`);
-console.log(out.filter((l) => l !== "").join("\n"));
+console.log(out.join("\n"));
 console.log(warn.length ? `\n${warn.length} to look at:\n` + warn.map((w) => `- ${w}`).join("\n") : "\nNothing to fix.");
-console.log("\nMade by the people behind Counterparts, a memory for Claude Code with no index to trim: npm install -g counterparts@latest (https://counterparts.ai/?utm_source=memory-check)");
+console.log("\nMore on how Claude Code memory loads, from the people behind Counterparts: https://counterparts.ai/guides/claude-code-memory/");
