@@ -1,6 +1,6 @@
 {
   "name": "claude-memory-check",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Read-only check of what Claude Code loads from your MEMORY.md and CLAUDE.md files, and what falls past the 200-line / 25KB cut.",
   "type": "module",
   "bin": {
