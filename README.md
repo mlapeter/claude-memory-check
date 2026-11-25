@@ -1,6 +1,6 @@
 # claude-memory-check
 
-Claude Code loads only the first 200 lines or 25KB of your auto memory index, `MEMORY.md`, at the start of a session, and drops the rest ([docs](https://code.claude.com/docs/en/memory#how-it-works)). Recent versions tell Claude when a write pushes the index over the limit, but that note goes to Claude, not to you, and an index that grew past it earlier stays cut. This shows you where the cut falls.
+Claude Code loads only the first 200 lines or 25KB of your auto memory index, `MEMORY.md`, at the start of a session, and drops the rest ([docs](https://code.claude.com/docs/en/memory#how-it-works)). Recent versions tell Claude when a write pushes the index over the limit, and add a one-line note to Claude's context when an index loads cut. Neither note is shown to you, and the load note quotes only the start of the first line it cut, so Claude finds the rest only if it goes and reads the file. This shows you where the cut falls and which entries are past it.
 
 ```
 npx claude-memory-check          # this folder's CLAUDE.md files and auto memory
@@ -25,6 +25,6 @@ Everything stays on your machine. It reads `MEMORY.md` and the file names in the
 
 ## Not handled
 
-A memory folder moved with `autoMemoryDirectory` (it says so instead), `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_PROJECT_DIR_NAME`, `AGENTS.md`, `.claude/rules/`, managed (organization) `CLAUDE.md` files, and Windows paths. The 25KB is measured in bytes, so an index with many non-ASCII characters may show the cut slightly early.
+A memory folder moved with `autoMemoryDirectory` (it says so instead), `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_PROJECT_DIR_NAME`, `AGENTS.md`, `.claude/rules/`, managed (organization) `CLAUDE.md` files, and Windows paths. The 25KB is 25,000 bytes, so an index with many non-ASCII characters reaches it sooner. Claude Code's own note prints sizes in KiB, so the same limit shows there as 24.4KB.
 
-MIT licensed. More on how Claude Code memory works, from the people behind Counterparts: [counterparts.ai/guides/claude-code-memory](https://counterparts.ai/guides/claude-code-memory/)
+MIT licensed. More on how Claude Code memory works, from the people behind Counterparts: [counterparts.ai/guides/claude-code-memory](https://counterparts.ai/guides/claude-code-memory/?utm_source=memory-check-readme)

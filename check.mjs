@@ -5,7 +5,8 @@
 //   npx claude-memory-check            this folder's CLAUDE.md files and its auto memory (MEMORY.md)
 //   npx claude-memory-check --all      every project's MEMORY.md under ~/.claude/projects
 //
-// Rules it checks, from Claude Code's docs (code.claude.com/docs/en/memory and /errors, read 2026-11-17):
+// Rules it checks, from Claude Code's docs (code.claude.com/docs/en/memory and /errors, read 2026-11-17, rechecked 2026-11-25
+// against Claude Code 2.1.332, whose limits are 200 lines and 25,000 bytes):
 // - only the first 200 lines or 25KB of MEMORY.md, whichever comes first, load at session start; the rest is dropped.
 //   YAML frontmatter and block-level HTML comments are stripped first and don't count.
 // - topic files in the memory folder are not loaded at startup; Claude opens them when the index points it there
@@ -192,4 +193,4 @@ if (all) {
 out.push(`\nCLAUDE.md files and imports: ${kb(total)} of context every session.`);
 console.log(out.join("\n"));
 console.log(warn.length ? `\n${warn.length} to look at:\n` + warn.map((w) => `- ${w}`).join("\n") : "\nNothing to fix.");
-console.log("\nMore on how Claude Code memory loads, from the people behind Counterparts: https://counterparts.ai/guides/claude-code-memory/");
+console.log("\nMore on how Claude Code memory loads, from the people behind Counterparts: https://counterparts.ai/guides/claude-code-memory/?utm_source=memory-check");
