@@ -60,9 +60,9 @@ test("missing link, orphan topic file, file listed only past the cut", () => {
   fs.writeFileSync(path.join(mem, "late.md"), "x");
   fs.writeFileSync(path.join(mem, "orphan.md"), "x");
   const o = run();
-  assert.match(o, /links 1 files that don't exist: gone\.md/);
-  assert.match(o, /1 topic files aren't in MEMORY\.md.*orphan\.md/);
-  assert.match(o, /1 topic files are only listed past the cut: late\.md/);
+  assert.match(o, /links 1 file that doesn't exist: gone\.md/);
+  assert.match(o, /1 topic file isn't in MEMORY\.md.*orphan\.md/);
+  assert.match(o, /1 topic file is only listed past the cut: late\.md/);
 });
 
 test("run from a subdirectory finds the repo's memory", () => {
@@ -70,7 +70,7 @@ test("run from a subdirectory finds the repo's memory", () => {
   fs.writeFileSync(path.join(mem, "MEMORY.md"), "- one\n");
   const sub = path.join(proj, "a", "b");
   fs.mkdirSync(sub, { recursive: true });
-  assert.match(run(sub), /This folder's auto memory: MEMORY\.md is 1 lines/);
+  assert.match(run(sub), /This folder's auto memory: MEMORY\.md is 1 line,/);
 });
 
 test("run from a git worktree finds the main repo's memory", () => {
@@ -80,7 +80,7 @@ test("run from a git worktree finds the main repo's memory", () => {
   fs.mkdirSync(wt);
   fs.mkdirSync(path.join(proj, ".git", "worktrees", "wt"), { recursive: true });
   fs.writeFileSync(path.join(wt, ".git"), `gitdir: ${path.join(proj, ".git", "worktrees", "wt")}\n`);
-  assert.match(run(wt), /This folder's auto memory: MEMORY\.md is 1 lines/);
+  assert.match(run(wt), /This folder's auto memory: MEMORY\.md is 1 line,/);
 });
 
 test("imports: bare names, nested, fenced ignored, missing flagged, @mentions ignored", () => {
@@ -114,7 +114,7 @@ test("--all lists every project; no memory says so", () => {
   const { mem, run } = setup();
   assert.match(run(), /No auto memory for this folder yet/);
   fs.writeFileSync(path.join(mem, "MEMORY.md"), "- one\n");
-  assert.match(run(undefined, "--all"), /-proj: MEMORY\.md is 1 lines/);
+  assert.match(run(undefined, "--all"), /-proj: MEMORY\.md is 1 line,/);
 });
 
 test("a comment line with trailing text doesn't swallow the lines after it", () => {
@@ -138,6 +138,6 @@ test("whole-name matching, URL links, directory imports", () => {
   fs.mkdirSync(path.join(proj, "docs"));
   fs.writeFileSync(path.join(proj, "CLAUDE.md"), "See @docs/ for more.\n");
   const o = run();
-  assert.match(o, /1 topic files aren't in MEMORY\.md.*a\.md/);
+  assert.match(o, /1 topic file isn't in MEMORY\.md.*a\.md/);
   assert.doesNotMatch(o, /example\.com|docs\/, which/);
 });

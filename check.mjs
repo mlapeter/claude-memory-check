@@ -32,6 +32,7 @@ const all = args.includes("--all");
 const home = os.homedir();
 const warn = [], out = [];
 const kb = (n) => `${(n / 1000).toFixed(1)}KB`;
+const n_ = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const read = (p) => { try { return fs.readFileSync(p, "utf8"); } catch { return null; } };
 const tilde = (p) => (p === home || p.startsWith(home + path.sep) ? "~" + p.slice(home.length) : p);
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
@@ -95,10 +96,10 @@ function checkMemory(dir, label) {
     if (i >= LINES || used > BYTES) { cut = i; break; }
   }
   const dropped = lines.slice(cut).filter((l) => l.trim());
-  out.push(`\n${label}: MEMORY.md is ${lines.length} lines, ${kb(bytes)}` +
+  out.push(`\n${label}: MEMORY.md is ${n_(lines.length, "line", "lines")}, ${kb(bytes)}` +
     (dropped.length ? `; ${dropped.length} entries after the first ${cut} loaded lines don't load at session start` : "; all of it loads"));
   if (dropped.length) {
-    warn.push(`${label}: ${dropped.length} MEMORY.md entries are past the 200-line/25KB cut, so Claude doesn't see them at the start of a session`);
+    warn.push(`${label}: ${n_(dropped.length, "MEMORY.md entry is", "MEMORY.md entries are")} past the 200-line/25KB cut, so Claude doesn't see them at the start of a session`);
     out.push(...dropped.slice(0, 5).map((l) => `    not loaded: ${l.slice(0, 100)}`));
     if (dropped.length > 5) out.push(`    ...and ${dropped.length - 5} more`);
   } else if (lines.length > LINES * 0.8 || bytes > BYTES * 0.8) {
@@ -107,15 +108,15 @@ function checkMemory(dir, label) {
   // Links in the index to topic files that don't exist, and topic files the index never mentions (Claude won't find them).
   const linked = new Set([...text.matchAll(/\]\(([^)#\s]+\.md)\)/g)].map((m) => m[1]).filter((f) => !/^[a-z][\w+.-]*:/i.test(f)));
   const missing = [...linked].filter((f) => !fs.existsSync(path.join(memDir, f)));
-  if (missing.length) warn.push(`${label}: MEMORY.md links ${missing.length} files that don't exist: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "..." : ""}`);
+  if (missing.length) warn.push(`${label}: MEMORY.md links ${n_(missing.length, "file that doesn't", "files that don't")} exist: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "..." : ""}`);
   const files = fs.readdirSync(memDir).filter((f) => f.endsWith(".md") && f !== "MEMORY.md");
   const before = lines.slice(0, cut).join("\n");
   const names = (t) => new Set(t.match(/[\w.-]+\.md/g) || []);
   const inText = names(text), inBefore = names(before);
   const orphans = files.filter((f) => !inText.has(f));
   const hidden = files.filter((f) => inText.has(f) && !inBefore.has(f));
-  if (orphans.length) warn.push(`${label}: ${orphans.length} topic files aren't in MEMORY.md, so nothing points Claude to them: ${orphans.slice(0, 4).join(", ")}${orphans.length > 4 ? "..." : ""}`);
-  if (hidden.length) warn.push(`${label}: ${hidden.length} topic files are only listed past the cut: ${hidden.slice(0, 4).join(", ")}${hidden.length > 4 ? "..." : ""}`);
+  if (orphans.length) warn.push(`${label}: ${n_(orphans.length, "topic file isn't", "topic files aren't")} in MEMORY.md, so nothing points Claude to ${orphans.length === 1 ? "it" : "them"}: ${orphans.slice(0, 4).join(", ")}${orphans.length > 4 ? "..." : ""}`);
+  if (hidden.length) warn.push(`${label}: ${n_(hidden.length, "topic file is", "topic files are")} only listed past the cut: ${hidden.slice(0, 4).join(", ")}${hidden.length > 4 ? "..." : ""}`);
   out.push(`    ${files.length} topic files (opened on demand, not at startup)`);
   return true;
 }
@@ -167,7 +168,7 @@ function checkClaudeMd(file) {
   const lines = lineArr.length, bytes = Buffer.byteLength(stripComments(text));
   const imp = importBytes(file, text, 1);
   const total = bytes + imp.total;
-  out.push(`${tilde(file)}: ${lines} lines, ${kb(bytes)}` + (imp.count ? `, ${imp.count} @imports (${kb(total)} with them)` : ""));
+  out.push(`${tilde(file)}: ${n_(lines, "line", "lines")}, ${kb(bytes)}` + (imp.count ? `, ${imp.count} @imports (${kb(total)} with them)` : ""));
   if (lines > CLAUDE_MD_LINES) warn.push(`${tilde(file)}: ${lines} lines; the docs suggest under ~200 per file, since all of it loads every session`);
   if (bytes > 4 * 1024 * 1024) warn.push(`${tilde(file)}: over 4 MiB, so Claude Code skips it entirely`);
   return total;
